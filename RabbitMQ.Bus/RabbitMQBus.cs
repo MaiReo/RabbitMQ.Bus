@@ -13,7 +13,7 @@ namespace RabbitMQ.Bus
     /// <summary>
     /// 
     /// </summary>
-    public class RabbitMQBusService
+    public class RabbitMQBusService : IRabbitMQBusService
     {
         private readonly RabbitMQBusFactory _factory;
         private readonly RabbitMQConfig _config;

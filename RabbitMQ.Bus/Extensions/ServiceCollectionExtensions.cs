@@ -4,6 +4,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using RabbitMQ.Bus.Extensions;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using System.Reflection;
+
 namespace Microsoft.Extensions.DependencyInjection
 {
     /// <summary>
@@ -21,24 +24,45 @@ namespace Microsoft.Extensions.DependencyInjection
         public static IServiceCollection AddRabbitMQBus(this IServiceCollection services, string connectionString, Action<RabbitMQConfig> actionSetup = null)
         {
             if (connectionString.IsNullOrWhiteSpace()) throw new ArgumentNullException(nameof(connectionString));
-            var config = new RabbitMQConfig(connectionString);
-            actionSetup?.Invoke(config);
-            services.AddSingleton(options => new RabbitMQBusService(options, config));
+
+            services.TryAddSingleton(sp =>
+            {
+                var config = new RabbitMQConfig(connectionString);
+                actionSetup?.Invoke(config);
+                return config;
+            });
+
+            services.TryAddSingleton<RabbitMQBusService>();
+
+            services.TryAddSingleton<IRabbitMQBusService>(sp => sp.GetService<RabbitMQBusService>());
+
             var allhandles = AppDomain.CurrentDomain.GetAssemblies().SelectMany(a =>
                 a.GetTypes()
                 .Where(t =>
                 (!t.IsAbstract)
                 && (!t.IsInterface)
                 && t.GetInterfaces().Any(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IRabbitMQBusHandler<>)))).ToArray();
+
+            var nonGenericHandlerIfaceType = typeof(IRabbitMQBusHandler);
+             
             foreach (var handleType in allhandles)
             {
-                var genericTypes = handleType.GetInterfaces().Where(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IRabbitMQBusHandler<>));
-                services.AddScoped(typeof(IRabbitMQBusHandler), handleType);
+
+                var genericTypes = handleType.GetInterfaces()
+                    .Where(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IRabbitMQBusHandler<>));
+                if (!services.Any(x => x.ServiceType == nonGenericHandlerIfaceType && x.ImplementationType == handleType))
+                {
+                    services.AddScoped(nonGenericHandlerIfaceType, handleType);
+                }
                 foreach (var genericType in genericTypes)
                 {
+                    if (services.Any(x => x.ServiceType == genericType && x.ImplementationType == handleType))
+                    {
+                        continue;
+                    }
                     services.AddScoped(genericType, handleType);
                 }
-                
+
             }
             return services;
         }
